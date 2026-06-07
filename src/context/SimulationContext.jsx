@@ -1,8 +1,7 @@
-import { createContext, useContext, useReducer, useEffect } from "react";
+import { useReducer, useEffect } from "react";
 import { SIMULATION, speed, demand, supply } from "../engine/lwr";
 import { findFastestRoute } from "../engine/dijkstra";
-
-const SimulationContext = createContext();
+import { SimulationContext } from "./SimulationContextFile";
 
 const initialState = {
   graph: { nodes: {}, edges: {} },
@@ -17,6 +16,8 @@ const initialState = {
     path: [],
     recomputeFlag: 0,
   },
+  incidentMode: false,
+  selectionMode: null,
   simRunning: false,
   loading: true,
   error: null,
@@ -74,50 +75,29 @@ function simulationReducer(state, action) {
 
     case "SIMULATION_STEP": {
       const { graph, traffic } = state;
-      // ─── Gestión de incidentes ───
-      let incidents = { ...traffic.incidents };
-
-      // Decrementar tiempo de vida
-      for (let eid in incidents) {
-        incidents[eid] = {
-          ...incidents[eid],
-          remainingTime: incidents[eid].remainingTime - 1,
-        };
-        if (incidents[eid].remainingTime <= 0) {
-          delete incidents[eid];
-        }
-      }
-
-      // Generar nuevo incidente aleatorio (7% de probabilidad cada segundo)
-      if (Math.random() < 0.07) {
-        const edgeIds = Object.keys(graph.edges);
-        if (edgeIds.length > 0) {
-          const randomEdge =
-            edgeIds[Math.floor(Math.random() * edgeIds.length)];
-          if (!incidents[randomEdge]) {
-            const duration = 15 + Math.floor(Math.random() * 20); // 15-35 segundos
-            incidents[randomEdge] = {
-              factor: 0.9, // bloquea el 90% del flujo de salida
-              remainingTime: duration,
-            };
-          }
-        }
-      }
+      
+      // 1. Preparar nuevos estados
       const newDensities = { ...traffic.densities };
       const newSpeeds = {};
+      const newIncidents = { ...traffic.incidents };
+      const allEdgeIds = Object.keys(graph.edges);
 
+      // 2. Calcular flujos de salida (Demanda)
       const outFlows = {};
       for (let edgeId in graph.edges) {
         const edge = graph.edges[edgeId];
         const rho = traffic.densities[edgeId] || 0;
         let flow = demand(rho, edge.length, edge.maxSpeed, edge.jamDensity);
-        // Aplicar bloqueo si hay incidente
-        if (incidents[edgeId]) {
-          flow *= 1 - incidents[edgeId].factor; // solo sale el 10% del flujo deseado
+        
+        // Aplicar bloqueo por incidente (manual o aleatorio)
+        if (newIncidents[edgeId]) {
+          const factor = newIncidents[edgeId].factor || 0.9;
+          flow *= (1 - factor); 
         }
         outFlows[edgeId] = flow;
       }
 
+      // 3. Calcular flujos de entrada (Oferta y Distribución)
       const inFlows = {};
       for (let nodeId in graph.nodes) {
         const node = graph.nodes[nodeId];
@@ -149,6 +129,9 @@ function simulationReducer(state, action) {
         }
       }
 
+      // 4. Integración Numérica (Método de Euler)
+      // Resolvemos la EDO de conservación: dN/dt = Σ q_in - Σ q_out
+      // Donde N es el número de vehículos (N = ρ * L)
       for (let edgeId in graph.edges) {
         const edge = graph.edges[edgeId];
         const L = edge.length;
@@ -164,11 +147,21 @@ function simulationReducer(state, action) {
         if (N_new > maxN) N_new = maxN;
         const newRho = N_new / L;
         newDensities[edgeId] = newRho;
-        newSpeeds[edgeId] = speed(newRho, rhoMax, edge.maxSpeed);
+        
+        // Calculamos velocidad base y aplicamos penalización si hay incidente
+        let s = speed(newRho, rhoMax, edge.maxSpeed);
+        
+        // Verificación robusta de incidente
+        const incident = newIncidents[edgeId];
+        if (incident) {
+          // Forzamos velocidad casi nula para el algoritmo de ruta
+          s = 0.00001;
+        }
+        
+        newSpeeds[edgeId] = s;
       }
 
-      // --- Inyección y sumidero de tráfico ---
-      const allEdgeIds = Object.keys(graph.edges);
+      // 5. Inyección y sumidero de tráfico
       const injectCount = Math.max(2, Math.floor(allEdgeIds.length * 0.06)); // 6% de las aristas como entradas
       const sinkCount = Math.max(1, Math.floor(allEdgeIds.length * 0.01)); // 1% como salidas
 
@@ -206,35 +199,34 @@ function simulationReducer(state, action) {
           Object.keys(newDensities).length,
       );
 
-      // --- Sistema de incidentes (bloqueos aleatorios) ---
-      const newIncidents = { ...traffic.incidents };
-
-      // Crear nuevos incidentes aleatoriamente (5% de probabilidad por paso)
-      if (Math.random() < 0.05) {
+      // 6. Gestión de incidentes y propagación de ondas
+      // Crear nuevos incidentes aleatoriamente (ej. 3% por paso de 0.5s ≈ 6% por segundo)
+      if (Math.random() < 0.03) {
         const randomEdgeId =
           allEdgeIds[Math.floor(Math.random() * allEdgeIds.length)];
-        newIncidents[randomEdgeId] = {
-          duration: 15, // 15 pasos de simulación
-          waveDistance: 0,
-          affectedEdges: [randomEdgeId],
-        };
-        // Bloquear totalmente la arista (densidad máxima)
-        newDensities[randomEdgeId] = graph.edges[randomEdgeId].jamDensity;
-        newSpeeds[randomEdgeId] = 0;
+        if (!newIncidents[randomEdgeId]) {
+          newIncidents[randomEdgeId] = {
+            remainingTime: 15 + Math.floor(Math.random() * 20),
+            factor: 0.9,
+            waveDistance: 0,
+            affectedEdges: [randomEdgeId],
+          };
+        }
       }
 
       // Actualizar incidentes existentes y propagar ondas rojas
-      const incidentsToRemove = [];
+      const updatedIncidents = {};
       for (const incidentEdgeId in newIncidents) {
-        const incident = newIncidents[incidentEdgeId];
-        incident.duration--;
+        const incident = { ...newIncidents[incidentEdgeId] }; // Clonar para evitar mutación
+        incident.remainingTime -= 1;
 
-        if (incident.duration <= 0) {
-          incidentsToRemove.push(incidentEdgeId);
-        } else {
+        if (incident.remainingTime > 0) {
           // Propagar onda roja hacia atrás (a las aristas entrantes)
           const edge = graph.edges[incidentEdgeId];
           if (edge) {
+            // Copiamos el array de aristas afectadas para mantener inmutabilidad
+            const newAffectedEdges = [...incident.affectedEdges];
+            
             const fromNodeId = edge.fromNode;
             if (fromNodeId !== undefined && graph.nodes[fromNodeId]) {
               const node = graph.nodes[fromNodeId];
@@ -244,28 +236,24 @@ function simulationReducer(state, action) {
                   if (
                     inEdge &&
                     inEdge.toNode === fromNodeId &&
-                    !incident.affectedEdges.includes(incomingEdgeId)
+                    !newAffectedEdges.includes(incomingEdgeId)
                   ) {
                     // Afectar la arista entrante: aumentar densidad (onda roja)
-                    const L = inEdge.length;
                     const currentRho = newDensities[incomingEdgeId] || 0;
                     newDensities[incomingEdgeId] = Math.min(
                       currentRho + 0.05,
                       inEdge.jamDensity * 0.8,
                     );
-                    incident.affectedEdges.push(incomingEdgeId);
+                    newAffectedEdges.push(incomingEdgeId);
                     incident.waveDistance++;
                   }
                 }
               }
             }
+            incident.affectedEdges = newAffectedEdges;
           }
+          updatedIncidents[incidentEdgeId] = incident;
         }
-      }
-
-      // Remover incidentes expirados
-      for (const edgeId of incidentsToRemove) {
-        delete newIncidents[edgeId];
       }
 
       return {
@@ -274,7 +262,7 @@ function simulationReducer(state, action) {
           ...traffic,
           densities: newDensities,
           speeds: newSpeeds,
-          incidents: newIncidents,
+          incidents: updatedIncidents,
         },
       };
     }
@@ -309,11 +297,74 @@ function simulationReducer(state, action) {
         ...state,
         route: {
           ...route,
-          path,
-          recomputeFlag: state.route.recomputeFlag + 1
+          path
         }
       };
     }
+
+    case 'TOGGLE_INCIDENT_MODE':
+      return { ...state, incidentMode: !state.incidentMode };
+
+    case 'SET_SELECTION_MODE':
+      return { ...state, selectionMode: action.payload };
+
+    case 'CREATE_MANUAL_INCIDENT': {
+      const edgeId = action.payload;
+      const { graph, traffic } = state;
+      const incidents = { ...traffic.incidents };
+      const newDensities = { ...traffic.densities };
+      const newSpeeds = { ...traffic.speeds };
+
+      if (!incidents[edgeId]) {
+        const edge = graph.edges[edgeId];
+        const duration = 240; // 2 minutos (en pasos de 0.5s) para pruebas extendidas
+        incidents[edgeId] = {
+          factor: 0.9, // Bloquea 90% del flujo
+          remainingTime: duration,
+          affectedEdges: [edgeId],
+          waveDistance: 0,
+          isManual: true,
+        };
+        // Llenar la arista de inmediato con vehículos
+        newDensities[edgeId] = edge.jamDensity;
+        newSpeeds[edgeId] = 0.00001; 
+        console.log('🚨 INCIDENTE MANUAL creado en arista:', edgeId, 'Duración:', duration, 'pasos');
+      }
+
+      return {
+        ...state,
+        route: {
+          ...state.route,
+          // Forzamos el recálculo de la ruta para que evite el nuevo incidente
+          recomputeFlag: state.route.recomputeFlag + 1
+        },
+        traffic: {
+          ...traffic,
+          incidents,
+          densities: newDensities,
+          speeds: newSpeeds,
+        },
+      };
+    }
+
+    case 'SET_ORIGIN_MANUAL':
+      return {
+        ...state,
+        route: { ...state.route, origin: action.payload, destination: null, path: [] }
+      };
+
+    case 'SET_DESTINATION_MANUAL':
+      if (!state.route.origin) return state;
+      return {
+        ...state,
+        route: { ...state.route, destination: action.payload, path: [] }
+      };
+
+    case 'CLEAR_ROUTE':
+      return {
+        ...state,
+        route: { ...state.route, origin: null, destination: null, path: [] }
+      };
 
     default:
       return state;
@@ -343,12 +394,4 @@ export function SimulationProvider({ children }) {
       {children}
     </SimulationContext.Provider>
   );
-}
-
-export function useSimulation() {
-  const context = useContext(SimulationContext);
-  if (!context) {
-    throw new Error("useSimulation debe usarse dentro de SimulationProvider");
-  }
-  return context;
 }

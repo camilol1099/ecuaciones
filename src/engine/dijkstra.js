@@ -31,8 +31,10 @@ export function findFastestRoute(graph, traffic, originNodeId, destinationNodeId
   while (pq.length > 0) {
     // Ordenar por distancia y tomar el menor (poco eficiente pero claro)
     pq.sort((a, b) => a[1] - b[1]);
-    const [u, d] = pq.shift();
-    if (u === destinationNodeId) break;
+    const [uStr] = pq.shift();
+    const u = String(uStr);
+
+    if (u === String(destinationNodeId)) break;
     if (visited.has(u)) continue;
     visited.add(u);
 
@@ -42,15 +44,23 @@ export function findFastestRoute(graph, traffic, originNodeId, destinationNodeId
     // Explorar aristas que salen de u (sentido correcto)
     for (let edgeId of node.edges) {
       const edge = edges[edgeId];
-      if (!edge || edge.fromNode != u) continue; // solo las que empiezan en u (respetamos dirección)
+      if (!edge || String(edge.fromNode) !== u) continue; 
+      
       const v = String(edge.toNode); // nodo destino
       if (visited.has(v)) continue;
 
       // Velocidad actual en esta arista (si no hay dato, usar la máxima)
-      const speed = traffic.speeds[edgeId] || edge.maxSpeed;
-      if (speed <= 0) continue; // calle totalmente bloqueada, no transitable
+      const currentSpeed = traffic.speeds[edgeId] || edge.maxSpeed;
+      
+      // Normalizamos la velocidad para evitar pesos infinitos o inconsistentes
+      // Incidentes (0.00001) < Atasco Crítico (0.001) < Tráfico Lento (2.0)
+      let effectiveSpeed = currentSpeed;
+      if (effectiveSpeed <= 0) effectiveSpeed = 0.001; 
 
-      const weight = edge.length / speed; // tiempo en segundos
+      // El peso es el TIEMPO (s) + una pequeña penalización por distancia (0.1)
+      // Esto evita que elija rutas ridículamente largas solo porque son 1ms más rápidas
+      const weight = (edge.length / effectiveSpeed) + (edge.length * 0.05);
+
       const alt = dist[u] + weight;
       if (alt < dist[v]) {
         dist[v] = alt;

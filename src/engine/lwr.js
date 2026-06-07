@@ -11,14 +11,16 @@ export const SIMULATION = {
 };
 
 /**
- * Velocidad en función de la densidad (Greenshields)
+ * Modelo de Greenshields: v(ρ) = V_max * (1 - ρ/ρ_max)
+ * Relación constitutiva lineal entre velocidad y densidad.
  */
 export function speed(rho, rhoMax = SIMULATION.RHO_MAX, vMax = SIMULATION.V_MAX) {
   return vMax * (1 - rho / rhoMax);
 }
 
 /**
- * Flujo deseado de salida de una arista (demanda)
+ * Función de Flujo (q = ρ * v). 
+ * Representa la 'Demanda' en el esquema de Daganzo.
  */
 export function demand(rho, length, vMax = SIMULATION.V_MAX, rhoMax = SIMULATION.RHO_MAX) {
   if (rho <= 0) return 0;
@@ -27,7 +29,8 @@ export function demand(rho, length, vMax = SIMULATION.V_MAX, rhoMax = SIMULATION
 }
 
 /**
- * Flujo máximo que puede aceptar una arista (oferta simplificada)
+ * Función de Oferta (Supply): Limitador de flujo basado en la capacidad residual.
+ * Previene que la densidad supere ρ_max (condición de frontera).
  */
 export function supply(rho, rhoMax = SIMULATION.RHO_MAX, vMax = SIMULATION.V_MAX) {
   const capacity = vMax * rhoMax * SIMULATION.CAPACITY_FACTOR; // veh/s

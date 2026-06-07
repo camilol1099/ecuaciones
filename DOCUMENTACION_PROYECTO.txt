@@ -514,6 +514,72 @@ Otros parámetros de simulación:
   SINK_RATE = 0.5%                    Cantidad drenada de capacidad
   ROUTE_RECOMPUTATION_TIME = 3000ms   Cada cuánto se recalcula ruta
 
+5.5 CALCULO DE DISTANCIA Y ETA (Estimated Time of Arrival)
+----------------------------------------------------------
+
+Para proporcionar información útil al usuario, el sistema calcula dos métricas clave 
+para la ruta seleccionada basándose en el estado actual de la simulación.
+
+ECUACION 6: DISTANCIA TOTAL DE LA RUTA
+--------------------------------------
+
+La distancia total es la sumatoria de las longitudes de todos los segmentos (aristas) 
+que componen el camino calculado por el algoritmo de Dijkstra.
+
+  D_total = Σ L_i   (para cada arista i ∈ path)
+
+Donde:
+  L_i = Longitud de la arista i en metros.
+
+ECUACION 7: TIEMPO ESTIMADO DE LLEGADA (ETA)
+--------------------------------------------
+
+El ETA se calcula sumando el tiempo de tránsito de cada segmento, utilizando la 
+velocidad actual (v_i) reportada por el motor de simulación en tiempo real.
+
+  ETA = Σ (L_i / v_effective_i)   (para cada arista i ∈ path)
+
+Donde:
+  v_effective_i = max(v_actual_i, 0.001)
+
+Consideraciones:
+  - Se utiliza una velocidad mínima de 0.001 m/s para evitar divisiones por cero.
+  - Si hay un incidente o congestión crítica, v_actual_i tiende a cero, lo que 
+    incrementa el ETA proporcionalmente, reflejando el retraso real.
+
+5.6 RESOLUCION NUMERICA: METODO DE EULER
+---------------------------------------
+
+Dado que el flujo de tráfico es un sistema dinámico, se utiliza el Método de Euler 
+para resolver la Ecuación Diferencial Ordinaria (EDO) que gobierna el número de 
+vehículos en cada segmento.
+
+EDO A RESOLVER:
+  dN/dt = Φ(t, N) = q_in(t) - q_out(t)
+
+APLICACION DEL METODO:
+  N(t + Δt) ≈ N(t) + Δt × Φ(t, N)
+
+En el código (SimulationContext.jsx):
+  deltaN = SIMULATION.DT * (flowIn - flowOut)
+  N_new = N_old + deltaN
+
+JUSTIFICACION TECNICA:
+1. DISCRETIZACION: El tiempo continuo se divide en pasos discretos (Δt = 0.5s).
+2. ESTABILIDAD (Condición CFL): Para garantizar que la simulación no "explote" 
+   numéricamente, el paso de tiempo Δt debe cumplir que:
+   
+   C = (v × Δt) / Δx  ≤ 1
+
+   En nuestro caso:
+   - v_max ≈ 13.9 m/s
+   - Δt = 0.5 s
+   - Δx (promedio) ≈ 60 m
+   - C ≈ (13.9 × 0.5) / 60 ≈ 0.115
+
+Como C < 1, el método de Euler es estable y la información no viaja más de un 
+segmento de calle por cada iteración.
+
 ================================================================================
 6. FLUJO DE DATOS EN LA APLICACION
 ================================================================================

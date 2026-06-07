@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import MapView from "./components/MapView";
-import { useSimulation } from "./context/SimulationContext";
+import { useSimulation } from "./context/useSimulation";
 import { SIMULATION } from "./engine/lwr";
 
 function App() {
