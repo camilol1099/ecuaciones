@@ -15,12 +15,38 @@ const initialState = {
     destination: null,
     path: [],
     recomputeFlag: 0,
+    previousTravelTime: null,
+    currentTravelTime: null,
   },
   incidentMode: false,
   selectionMode: null,
   simRunning: false,
   loading: true,
   error: null,
+  statistics: {
+    densityHistory: [], // Array de {timestamp, averageDensity}
+    incidentCount: 0,
+    totalIncidentsOccurred: 0,
+    routeImprovement: 0, // Porcentaje de mejora o empeora
+  },
+  trafficLights: {},
+  defaultTrafficLights: {
+    '0': { state: 'green', greenDuration: 30, redDuration: 30, elapsed: 0 },
+    '559': { state: 'red', greenDuration: 30, redDuration: 30, elapsed: 0 },
+    '560': { state: 'green', greenDuration: 30, redDuration: 30, elapsed: 0 },
+    '558': { state: 'red', greenDuration: 30, redDuration: 30, elapsed: 0 },
+    '553': { state: 'green', greenDuration: 30, redDuration: 30, elapsed: 0 },
+    '554': { state: 'red', greenDuration: 30, redDuration: 30, elapsed: 0 },
+    '571': { state: 'green', greenDuration: 30, redDuration: 30, elapsed: 0 },
+    '573': { state: 'red', greenDuration: 30, redDuration: 30, elapsed: 0 },
+    '567': { state: 'green', greenDuration: 30, redDuration: 30, elapsed: 0 },
+    '565': { state: 'red', greenDuration: 30, redDuration: 30, elapsed: 0 },
+    '566': { state: 'green', greenDuration: 30, redDuration: 30, elapsed: 0 },
+    '545': { state: 'red', greenDuration: 30, redDuration: 30, elapsed: 0 },
+    '546': { state: 'green', greenDuration: 30, redDuration: 30, elapsed: 0 },
+    '537': { state: 'red', greenDuration: 30, redDuration: 30, elapsed: 0 },
+    '53': { state: 'green', greenDuration: 30, redDuration: 30, elapsed: 0 },
+  }
 };
 
 function simulationReducer(state, action) {
@@ -64,6 +90,7 @@ function simulationReducer(state, action) {
           densities: initialDensities,
           speeds: {},
         },
+        trafficLights: state.defaultTrafficLights,
       };
     }
 
@@ -74,7 +101,23 @@ function simulationReducer(state, action) {
       return { ...state, simRunning: false };
 
     case "SIMULATION_STEP": {
-      const { graph, traffic } = state;
+      const { graph, traffic, trafficLights } = state;
+      
+      // 0. Actualizar ciclos de semáforos automáticos
+      const DT = 0.5; // Intervalo de tiempo en segundos
+      const updatedTrafficLights = {};
+      for (const nodeId in trafficLights) {
+        const light = { ...trafficLights[nodeId] };
+        light.elapsed = (light.elapsed || 0) + DT;
+        
+        const currentDuration = light.state === 'green' ? light.greenDuration : light.redDuration;
+        if (light.elapsed >= currentDuration) {
+          light.elapsed = 0;
+          light.state = light.state === 'green' ? 'red' : 'green';
+        }
+        
+        updatedTrafficLights[nodeId] = light;
+      }
       
       // 1. Preparar nuevos estados
       const newDensities = { ...traffic.densities };
@@ -94,6 +137,13 @@ function simulationReducer(state, action) {
           const factor = newIncidents[edgeId].factor || 0.9;
           flow *= (1 - factor); 
         }
+        
+        // Aplicar penalización por semáforo en rojo en el nodo destino
+        const toNodeId = String(edge.toNode);
+        if (updatedTrafficLights[toNodeId] && updatedTrafficLights[toNodeId].state === 'red') {
+          flow *= 0.1; // Reduce a 10% del flujo normal cuando está en rojo
+        }
+        
         outFlows[edgeId] = flow;
       }
 
@@ -256,6 +306,25 @@ function simulationReducer(state, action) {
         }
       }
 
+      // Calcular estadísticas
+      const densityValues = Object.values(newDensities);
+      const averageDensity = densityValues.length > 0 
+        ? densityValues.reduce((a, b) => a + b, 0) / densityValues.length 
+        : 0;
+      
+      const incidentCount = Object.keys(updatedIncidents).length;
+      
+      // Historial de densidades (últimos 120 puntos = 60 segundos con DT=0.5)
+      const newHistory = [...state.statistics.densityHistory, { 
+        timestamp: state.statistics.densityHistory.length,
+        averageDensity 
+      }];
+      if (newHistory.length > 120) newHistory.shift();
+      
+      // Contar incidentes nuevos
+      const prevIncidentCount = Object.keys(traffic.incidents).length;
+      const newIncidentsCount = incidentCount > prevIncidentCount ? 1 : 0;
+      
       return {
         ...state,
         traffic: {
@@ -263,6 +332,13 @@ function simulationReducer(state, action) {
           densities: newDensities,
           speeds: newSpeeds,
           incidents: updatedIncidents,
+        },
+        trafficLights: updatedTrafficLights,
+        statistics: {
+          ...state.statistics,
+          densityHistory: newHistory,
+          incidentCount,
+          totalIncidentsOccurred: state.statistics.totalIncidentsOccurred + newIncidentsCount,
         },
       };
     }
@@ -293,11 +369,33 @@ function simulationReducer(state, action) {
       }
       const path = findFastestRoute(graph, traffic, route.origin, route.destination);
       console.log('  ✓ Ruta calculada, aristas:', path.length, 'IDs:', path);
+      
+      // Calcular tiempo de viaje actual
+      let currentTravelTime = 0;
+      for (const edgeId of path) {
+        const edge = graph.edges[edgeId];
+        const speed = traffic.speeds[edgeId] || edge.maxSpeed;
+        const time = speed > 0 ? edge.length / speed : 999; // tiempo en segundos
+        currentTravelTime += time;
+      }
+      
+      // Calcular porcentaje de mejora/empeora
+      let improvement = 0;
+      if (route.previousTravelTime && route.previousTravelTime > 0) {
+        improvement = ((route.previousTravelTime - currentTravelTime) / route.previousTravelTime) * 100;
+      }
+      
       return {
         ...state,
         route: {
           ...route,
-          path
+          path,
+          previousTravelTime: route.currentTravelTime,
+          currentTravelTime,
+        },
+        statistics: {
+          ...state.statistics,
+          routeImprovement: improvement,
         }
       };
     }
@@ -366,6 +464,37 @@ function simulationReducer(state, action) {
         route: { ...state.route, origin: null, destination: null, path: [] }
       };
 
+    case 'SET_TRAFFIC_LIGHT': {
+      const { nodeId, state: lightState } = action.payload;
+      const newTrafficLights = { ...state.trafficLights };
+      
+      if (newTrafficLights[nodeId]) {
+        newTrafficLights[nodeId].state = lightState;
+      } else {
+        newTrafficLights[nodeId] = {
+          state: lightState,
+          cycle: 0,
+          duration: 30, // 30 segundos por ciclo
+        };
+      }
+      
+      return {
+        ...state,
+        trafficLights: newTrafficLights,
+      };
+    }
+
+    case 'REMOVE_TRAFFIC_LIGHT': {
+      const nodeId = action.payload;
+      const newTrafficLights = { ...state.trafficLights };
+      delete newTrafficLights[nodeId];
+      
+      return {
+        ...state,
+        trafficLights: newTrafficLights,
+      };
+    }
+
     default:
       return state;
   }
@@ -395,3 +524,5 @@ export function SimulationProvider({ children }) {
     </SimulationContext.Provider>
   );
 }
+
+

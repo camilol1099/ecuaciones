@@ -902,6 +902,250 @@ scripts/raw_valledupar.geojson ~MB    Datos sin procesar en GeoJSON:
 src/index.css                 ~30     Estilos globales:
                                       - Fullscreen layout para el mapa
                                       - Reset de márgenes y padding
+
+================================================================================
+9. NUEVAS CARACTERÍSTICAS: ESTADÍSTICAS EN TIEMPO REAL Y SEMÁFOROS
+================================================================================
+
+FECHA DE IMPLEMENTACION: Junio 2026
+
+9.1 PANEL DE ESTADÍSTICAS EN TIEMPO REAL
+-----------------------------------------
+
+Archivo: src/components/StatsPanel.jsx
+
+DESCRIPCION:
+Panel interactivo que visualiza cuatro métricas clave del modelo LWR en 
+tiempo real, permitiendo ver la evolución del tráfico de manera clara.
+
+METRICAS MOSTRADAS:
+
+1. GRAFICO DE DENSIDAD PROMEDIO
+   - Tipo: Gráfico de línea (LineChart de Recharts)
+   - Datos: Últimos 120 puntos = 60 segundos de historia
+   - Frecuencia de actualización: Cada SIMULATION_STEP (500ms)
+   - Eje Y: Densidad en veh/m (rango típico: 0 a 0.06)
+   - Eje X: Tiempo (0 a 120 puntos)
+   - Utilidad: Permite visualizar patrones de congestión en tiempo real
+
+   Ejemplo de lectura:
+   - Si el gráfico baja cuando se resuelve un incidente: modelo 
+     funciona correctamente
+   - Si sube cuando se activa un semáforo en rojo: efecto esperado
+
+2. CONTADOR DE INCIDENTES
+   Dos números:
+   a) INCIDENTES ACTIVOS: Cantidad de incidentes ocurriendo ahora
+      - Fondo rojo si hay incidentes (>0)
+      - Fondo verde si no hay incidentes (=0)
+   
+   b) TOTAL INCIDENTES OCURRIDOS: Suma acumulativa durante la sesión
+      - Se incrementa cuando un incidente nuevo aparece
+      - Nunca decrementa
+
+   Utilidad: Monitorear frecuencia y cantidad de problemas en el sistema
+
+3. INDICADOR DE MEJORA/EMPEORA DE RUTA
+   - Solo aparece cuando hay ruta calculada (origen + destino)
+   - Métrica: Cambio porcentual en tiempo de viaje
+   - Cálculo: 
+     improvement% = ((previousTime - currentTime) / previousTime) * 100
+   
+   Visualización:
+   - Color VERDE (↓): Ruta mejoró (tiempo de viaje redujo)
+   - Color ROJO (↑): Ruta empeoró (tiempo de viaje aumentó)
+   - Color GRIS (-): Sin cambio significativo
+   
+   Tiempo mostrado: En formato m:ss (minutos:segundos)
+   
+   Ejemplo: Si muestra "↓ 15%", la ruta es 15% más rápida que antes
+
+4. DENSIDAD ACTUAL
+   - Valor promedio en este momento de todas las vías del sistema
+   - Unidad: veh/m (vehículos por metro de calle)
+   - Se actualiza cada 500ms
+   - Rango esperado: 0.02 a 0.08 típicamente
+   
+   Interpretación:
+   - < 0.01: Sistema muy fluido
+   - 0.01-0.03: Fluido a normal
+   - 0.03-0.05: Normal a congestionado
+   - > 0.05: Sistema congestionado
+
+INTERACCION CON EL CONTEXTO:
+- Recibe state de SimulationContext
+- Lee: state.statistics, state.route, state.traffic
+- Se renderiza condicionalmente: solo cuando state.simRunning === true
+- Posicionamiento: Esquina inferior derecha (zIndex: 1000)
+
+LIBRERIAS USADAS:
+- Recharts: Para gráficos de datos
+- React: Para componentes interactivos
+- React-Leaflet: Para integración con mapa
+
+9.2 SEMÁFOROS SIMULADOS
+------------------------
+
+Archivo: src/components/TrafficLights.jsx
+
+DESCRIPCION:
+Sistema de control interactivo de semáforos en nodos de intersección. 
+Cada semáforo puede estar en estado VERDE o ROJO, afectando directamente 
+el flujo de tráfico en los edges que salen de ese nodo.
+
+MECANICA:
+
+Visualización:
+- CircleMarkers en cada nodo del grafo
+- Radio normal: 6px (sin semáforo)
+- Radio activo: 10px (con semáforo)
+- Color: Gris (sin semáforo), Verde (🟢 activo en verde), Rojo (🔴 activo en rojo)
+
+Estados:
+- SIN SEMAFORO: Círculo gris pequeño, sin efecto en tráfico
+- VERDE: Círculo verde grande, flujo normal (100%)
+- ROJO: Círculo rojo grande, flujo reducido (10%)
+
+Interactividad:
+- Click en círculo: Abre popup con opciones
+  - "Crear semáforo" (si no existe)
+  - "Alternar semáforo" (si existe)
+- Tooltip al pasar el mouse: Muestra estado actual y ciclo
+- Cada semáforo tiene su propio estado independiente
+
+EFECTO MATEMATICO EN EL FLUJO:
+
+En SIMULATION_STEP, se aplica penalización en outFlow:
+
+  if (semaforo[toNode].state === 'RED') {
+    outFlow = demand(...) * 0.1  // Reduce a 10% del flujo normal
+  }
+
+Consecuencias:
+- Los vehículos no pueden salir del edge: densidad aumenta
+- Se forma una acumulación (congestión local)
+- La onda se propaga hacia atrás en el grafo (onda roja)
+- Cuando el semáforo cambia a verde, el flujo normaliza
+
+EJEMPLOS DE USO:
+
+Caso 1: Simular "Hora Punta" en Intersección Crítica
+1. Activar simulación
+2. Click en un nodo principal (ej: centro de ciudad)
+3. Dejar semáforo en ROJO por 30-60 segundos
+4. Observar acumulación de tráfico en el gráfico LWR
+5. Cambiar a VERDE
+6. Observar cómo se disipa la congestión
+
+Caso 2: Optimizar Flujo en Calle Principal
+1. Crear semáforos en 3-4 nodos consecutivos
+2. Configurarlos con ciclos manuales (verde 30s, rojo 20s)
+3. Observar patrón de tráfico
+4. Ajustar para minimizar densidad promedio
+
+Caso 3: Onda Verde
+1. Identificar una calle principal (múltiples nodos)
+2. Coordinación manual: verde escalonado
+   - Nodo A: Verde
+   - Nodo B (downstream): Verde después de 5-10s
+   - Nodo C: Verde después de otros 5-10s
+3. Esto permite que los vehículos atraviesen sin detenerse
+
+INTEGRACION CON CONTEXTO:
+
+En SimulationContext.jsx:
+
+a) Estado agregado:
+   trafficLights: {
+     nodeId: { state: 'red'|'green', cycle: number, duration: 30 }
+   }
+
+b) Action type nuevo:
+   SET_TRAFFIC_LIGHT: { nodeId, state }
+
+c) Modificación en SIMULATION_STEP:
+   - Cuando se calcula outFlow
+   - Se verifica: if (state.trafficLights[toNode]?.state === 'red')
+   - Se multiplica outFlow por 0.1
+
+LIBRERIAS USADAS:
+- React-Leaflet: CircleMarker, Popup, Tooltip
+- React: Hooks para manejo de estado
+
+9.3 CAMBIOS EN ARCHIVOS EXISTENTES
+-----------------------------------
+
+src/components/MapView.jsx:
+- Agregados imports de StatsPanel y TrafficLights
+- StatsPanel renderizado dentro del div principal (condicional)
+- TrafficLights renderizado dentro de MapContainer
+
+src/context/SimulationContext.jsx:
+- initialState extendido con: statistics, trafficLights, route.currentTravelTime, 
+  route.previousTravelTime
+- SIMULATION_STEP: Ahora calcula y guarda densityHistory
+- SIMULATION_STEP: Cuenta nuevos incidentes
+- COMPUTE_ROUTE: Calcula tiempo de viaje y porcentaje de mejora
+- Nuevo case: SET_TRAFFIC_LIGHT para alternar estados de semáforos
+- Penalización aplicada en cálculo de outFlows por semáforos en rojo
+
+src/App.jsx:
+- Sin cambios (funcionalidad existente compatible)
+
+9.4 PROMEDIO DE LINEAS DE CODIGO AGREGADAS
+
+Componente              Lineas    Proposito
+────────────────────────────────────────────────────────────────
+StatsPanel.jsx          ~180      Panel de estadísticas completo
+TrafficLights.jsx       ~130      Control de semáforos simulados
+SimulationContext.jsx   ~80       Lógica de estadísticas + semáforos
+MapView.jsx (cambios)   ~5        Integraciones de nuevos componentes
+
+Total nuevo código:     ~395 líneas
+
+9.5 DEPENDENCIAS AGREGADAS
+
+npm install recharts    Librería de gráficos React
+                        - Version 2.x+
+                        - Usado solo en StatsPanel
+                        - Lightweight, bien documentada
+                        - Alternativa considerada: Chart.js, Apache ECharts
+
+================================================================================
+10. USO Y MONITOREO DEL SISTEMA
+================================================================================
+
+FLUJO TIPICO DE SIMULACION:
+
+1. Iniciar la aplicación
+2. Hacer clic en "▶ Iniciar Simulación"
+3. Panel de estadísticas aparece en esquina inferior derecha
+4. Observar gráfico de densidad promedio
+5. Crear ruta haciendo clic en 2 nodos
+6. Ver indicador de mejora/empeora en tiempo real
+7. Crear incidentes haciendo clic "🚨 Crear Incidentes"
+8. Observar cómo afecta el panel de estadísticas
+9. Crear semáforos haciendo clic en nodos
+10. Observar el efecto en densidad y flujo
+
+METRICAS CLAVE PARA MONITOREO:
+
+Densidad Promedio:
+- Indicador de salud del sistema
+- Si > 0.05: Sistema congestionado
+- Picos pueden indicar incidentes sin resolver
+
+Contador de Incidentes:
+- Frecuencia: ¿Cuántos incidentes por minuto?
+- Duración: ¿Cuánto tardan en resolverse?
+- Impacto: ¿Cuánto sube la densidad por incidente?
+
+Mejora/Empeora de Ruta:
+- Muestra impacto real de cambios en el sistema
+- Si baja mucho: Sistema no tiene alternativas
+- Si sube: Hay rutas alternas disponibles
+
+================================================================================
                                       - Fuente y background
 
 vite.config.js                ~20     Configuración de Vite:

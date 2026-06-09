@@ -2,6 +2,8 @@ import { MapContainer, TileLayer, Polyline, useMapEvents, Marker, Popup, Tooltip
 import { useSimulation } from "../context/useSimulation";
 import { useEffect } from "react";
 import "leaflet/dist/leaflet.css";
+import StatsPanel from "./StatsPanel";
+import TrafficLights from "./TrafficLights";
 
 const center = [10.4631, -73.2532];
 const zoom = 15;
@@ -267,6 +269,9 @@ function MapView() {
             />
           );
         })()}
+        
+        {/* Semáforos simulados */}
+        <TrafficLights />
       </MapContainer>
 
       <div
@@ -391,6 +396,9 @@ function MapView() {
           </div>
         )}
       </div>
+
+      {/* Panel de estadísticas en tiempo real */}
+      {state.simRunning && <StatsPanel />}
     </div>
   );
 }
