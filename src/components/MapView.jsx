@@ -280,119 +280,132 @@ function MapView() {
           top: 10,
           left: 10,
           zIndex: 1000,
-          background: "white",
-          padding: "12px",
-          borderRadius: "8px",
-          boxShadow: "0 2px 10px rgba(0,0,0,0.3)",
+          background: "rgba(255, 255, 255, 0.95)",
+          backdropFilter: "blur(8px)",
+          padding: "16px",
+          borderRadius: "12px",
+          boxShadow: "0 4px 20px rgba(0,0,0,0.15)",
           display: "flex",
           flexDirection: "column",
-          gap: "8px",
+          gap: "10px",
+          fontFamily: "system-ui, -apple-system, sans-serif",
+          width: "220px",
         }}
       >
+        <h3 style={{ margin: "0 0 4px 0", fontSize: "16px", fontWeight: "bold", color: "#1f2937" }}>
+          🗺️ Simulación
+        </h3>
+
         <button
           onClick={() =>
             dispatch({
               type: simRunning ? "STOP_SIMULATION" : "START_SIMULATION",
             })
           }
-          style={{ padding: "8px 12px", fontWeight: "bold", cursor: "pointer" }}
+          style={{
+            padding: "9px 12px",
+            fontWeight: "600",
+            fontSize: "13px",
+            cursor: "pointer",
+            backgroundColor: simRunning ? "#475569" : "#3b82f6",
+            color: "white",
+            border: "none",
+            borderRadius: "8px",
+          }}
         >
           {simRunning ? "⏸ Detener Simulación" : "▶ Iniciar Simulación"}
         </button>
-        
+
         <button
           onClick={() => dispatch({ type: 'TOGGLE_INCIDENT_MODE' })}
           style={{
-            padding: "8px 12px",
-            fontWeight: "bold",
-            backgroundColor: state.incidentMode ? "#ff6b6b" : "#e0e0e0",
-            color: state.incidentMode ? "white" : "black",
+            padding: "9px 12px",
+            fontWeight: "600",
+            fontSize: "13px",
+            backgroundColor: state.incidentMode ? "#ef4444" : "#f1f5f9",
+            color: state.incidentMode ? "white" : "#475569",
             border: "none",
-            borderRadius: "4px",
+            borderRadius: "8px",
             cursor: "pointer",
           }}
         >
           {state.incidentMode ? "🚨 Modo Incidente (ON)" : "🚨 Crear Incidentes"}
         </button>
-        
+
         {state.route.path.length > 0 && (
           <div style={{
-            padding: "8px",
-            backgroundColor: "#e0f7fa",
-            borderRadius: "4px",
-            fontSize: "13px",
-            border: "1px solid #00acc1"
+            padding: "12px",
+            background: "#f0f9ff",
+            borderRadius: "8px",
+            borderLeft: "3px solid #0ea5e9",
+            fontSize: "12px",
+            color: "#475569",
           }}>
-            <b>Información de Ruta:</b><br/>
-            Distancia: {(state.route.path.reduce((acc, id) => acc + (graph.edges[id]?.length || 0), 0) / 1000).toFixed(2)} km
+            <p style={{ margin: "0 0 4px 0", fontSize: "11px", fontWeight: "600", color: "#64748b" }}>
+              RUTA ACTIVA
+            </p>
+            Distancia: <strong>{(state.route.path.reduce((acc, id) => acc + (graph.edges[id]?.length || 0), 0) / 1000).toFixed(2)} km</strong>
             <br/>
             {(() => {
               const totalSeconds = state.route.path.reduce((acc, id) => {
                 const edge = graph.edges[id];
                 if (!edge) return acc;
                 const speed = traffic.speeds[id] || edge.maxSpeed;
-                const effectiveSpeed = speed > 0 ? speed : 0.001; // Evitar división por cero
+                const effectiveSpeed = speed > 0 ? speed : 0.001;
                 return acc + (edge.length / effectiveSpeed);
               }, 0);
               const mins = Math.floor(totalSeconds / 60);
               const secs = Math.floor(totalSeconds % 60);
-              return <span>ETA: <b>{mins > 0 ? `${mins} min ` : ""}{secs} seg</b></span>;
+              return <span>ETA: <strong>{mins > 0 ? `${mins} min ` : ""}{secs} seg</strong></span>;
             })()}
             <br/>
-            Estado: <span style={{color: "#007c91"}}>Optimizado por tiempo</span>
+            <span style={{ color: "#0ea5e9", fontSize: "11px" }}>Optimizado por tiempo</span>
           </div>
         )}
 
         <button
           onClick={() => dispatch({ type: 'CLEAR_ROUTE' })}
           style={{
-            padding: "8px 12px",
-            fontWeight: "bold",
-            backgroundColor: "#f44336",
-            color: "white",
-            border: "none",
-            borderRadius: "4px",
+            padding: "9px 12px",
+            fontWeight: "600",
+            fontSize: "13px",
+            backgroundColor: "#fef2f2",
+            color: "#ef4444",
+            border: "1px solid #fecaca",
+            borderRadius: "8px",
             cursor: "pointer",
           }}
         >
           🗑️ Limpiar Todo
         </button>
 
-         <div style={{ marginTop: 8 }}>
-           <span style={{ color: "#22c55e" }}>● Fluido</span>
-           <br />
-           <span style={{ color: "#84cc16" }}>● Leve</span>
-           <br />
-           <span style={{ color: "#eab308" }}>● Medio</span>
-           <br />
-           <span style={{ color: "#f97316" }}>● Muy Congestionado</span>
-           <br />
-           <span style={{ color: "#ef4444" }}>● Crítico (Rojo)</span>
-           <br />
-           <span style={{ color: "#000" }}>● Bloqueo (Incidente)</span>
-         </div>
+        <div style={{ padding: "12px", background: "#f1f5f9", borderRadius: "8px" }}>
+          <p style={{ margin: "0 0 8px 0", fontSize: "11px", fontWeight: "600", color: "#64748b" }}>
+            LEYENDA
+          </p>
+          <div style={{ display: "flex", flexDirection: "column", gap: "4px", fontSize: "12px", color: "#374151" }}>
+            <span style={{ color: "#22c55e" }}>● Fluido</span>
+            <span style={{ color: "#84cc16" }}>● Leve</span>
+            <span style={{ color: "#eab308" }}>● Medio</span>
+            <span style={{ color: "#f97316" }}>● Muy Congestionado</span>
+            <span style={{ color: "#ef4444" }}>● Crítico</span>
+            <span style={{ color: "#1f2937" }}>● Bloqueo (Incidente)</span>
+          </div>
+        </div>
 
         {!loading && graph.edges && (
-          <div
-            style={{
-              marginTop: 8,
-              fontSize: "12px",
-              borderTop: "1px solid #ccc",
-              paddingTop: 8,
-            }}
-          >
-            <strong>Debug:</strong>
-            <br />
-            Primera arista densidad: {(traffic.densities[Object.keys(graph.edges)[0]] || 0).toFixed(4)}
-            <br />
-            Densidad promedio: {(
-              Object.values(traffic.densities).reduce((a, b) => a + b, 0) /
-                Object.keys(traffic.densities).length || 0
-            ).toFixed(4)}
-            <br />
-            <span style={{ color: "#000" }}>
-              ● Incidentes activos: {Object.keys(traffic.incidents || {}).length}
-            </span>
+          <div style={{ padding: "12px", background: "#f1f5f9", borderRadius: "8px" }}>
+            <p style={{ margin: "0 0 6px 0", fontSize: "11px", fontWeight: "600", color: "#64748b" }}>
+              DEBUG
+            </p>
+            <div style={{ fontSize: "12px", color: "#475569", display: "flex", flexDirection: "column", gap: "2px" }}>
+              <span>1ª arista: {(traffic.densities[Object.keys(graph.edges)[0]] || 0).toFixed(4)}</span>
+              <span>Densidad media: {(
+                Object.values(traffic.densities).reduce((a, b) => a + b, 0) /
+                  Object.keys(traffic.densities).length || 0
+              ).toFixed(4)}</span>
+              <span>Incidentes activos: <strong>{Object.keys(traffic.incidents || {}).length}</strong></span>
+            </div>
           </div>
         )}
       </div>
